@@ -7,32 +7,95 @@
 <script>
 'use strict';
 const DB='https://fut-de-quinta-46c70-default-rtdb.firebaseio.com/futebol/state.json';
-const ADMINS=['leopz','chico','henrique','estevao','renan','leom'];
+const ADMINS=['leopz','chico','henrique','estevao','caique','leom'];
 const KEY='futdequinta_role_v1';
 const defaultNames=['Estevão','Celso','Kaique','Lucas','Léo Pz','Henrique','Caique','Rogerio','Hugo','Francenir','Renan','Chico','Renan R','Nicolas','Lucas Tette','Leo M','Vini','Marcos','LD','Cauan','Miqueias','Edric','Jhol','Guedes'];
 const defaultPote=['Renan','Chico','Leo M','Léo Pz'];
-let role=sessionStorage.getItem(KEY)||'',state=null,requesting=false,editing=false,busy=false,lastJson='',fetchError=false;
+let role=ADMINS.includes(sessionStorage.getItem(KEY))?sessionStorage.getItem(KEY):'',state=null,requesting=false,editing=false,busy=false,lastJson='',fetchError=false;
 const $=id=>document.getElementById(id);
 const clean=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 const escapeHTML=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const shuffled=a=>{let b=[...a];for(let i=b.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b;};
 const showMsg=(txt,isError=false)=>{$('message').textContent=txt;$('message').className='status '+(isError?'err':'ok');};
-const member=(p,s)=>s.captains.some(x=>clean(x)===clean(p));
+const member=(p,s)=>(s.captains||[]).some(x=>clean(x)===clean(p));
 const team=(s,id)=>s.teams.find(t=>t.id===id);
+const extrasOf=s=>Array.isArray(s.extras)?s.extras:[];
+const totalOf=s=>s.teams.reduce((n,t)=>n+t.players.length,0)+extrasOf(s).length;
 const listPlayers=(arr,s)=>arr.map(p=>`<div class="player ${member(p,s)?'star':''}">${member(p,s)?'⭐ ':''}${escapeHTML(p)}</div>`).join('');
 const teamCard=(s,id,canLose=false)=>{let t=team(s,id);return `<div class="team"><div class="headrow"><h3>Time ${id}</h3><span class="pill">${t.players.length}/5</span></div>${listPlayers(t.players,s)}${canLose&&role?`<button class="danger wide" style="margin-top:12px" data-lose="${id}">Perdeu</button>`:''}</div>`};
 function makeInitial(names,pote){const captains=pote.map(n=>names.find(x=>clean(x)===clean(n)));const others=shuffled(names.filter(n=>!captains.includes(n)));const ts=[0,1,2,3].map(i=>({id:i+1,players:shuffled([captains[i],...others.slice(i*4,i*4+4)])}));ts.push({id:5,players:others.slice(16,19)});return {version:1,teams:ts,captains,extras:others.slice(19),field:[1,2],queue:[3,4],waiting:5,round:1,started:false,history:[],updatedAt:Date.now()};}
 function render(){ $('roleText').textContent=role?'✏️ Editando: '+role:'👀 Modo espectador';$('authBtn').textContent=role?'Sair':'Entrar para editar';if(editing)return;const app=$('app');if(!state){app.innerHTML=`<section class="panel empty"><div style="font-size:35px">⚽</div><h2>Nenhum sorteio ainda</h2><p class="muted">${role?'Cadastre os jogadores para começar.':'Aguardando um dos organizadores criar os times.'}</p>${role?'<button data-config="1">Criar primeira partida</button>':''}</section>`;return;}const s=state;
-if(!s.started){app.innerHTML=`<section class="panel"><div class="row"><h2 class="title">Times sorteados</h2><span class="pill">Antes da 1ª partida</span></div><div class="grid">${[1,2,3,4].map(id=>teamCard(s,id)).join('')}</div><hr class="divider"><h3>Time 5 — Incompleto</h3>${listPlayers(team(s,5).players,s)}${s.extras.length?`<p class="muted small">Reservas extras: ${escapeHTML(s.extras.join(', '))}</p>`:''}${role?`<hr class="divider"><h3>Escolher primeira partida</h3><div class="flex2"><div><label>Time A</label><select id="firstA">${[1,2,3,4].map(i=>`<option value="${i}">Time ${i}</option>`).join('')}</select></div><div><label>Time B</label><select id="firstB">${[2,1,3,4].map(i=>`<option value="${i}">Time ${i}</option>`).join('')}</select></div></div><button class="wide" style="margin-top:12px" data-start="1">▶ Iniciar partida</button><div class="toolbar" style="margin-top:8px"><button class="secondary" data-config="1">Editar lista</button><button class="secondary" data-resort="1">Sortear novamente</button></div>`:''}</section>`;return;}
-app.innerHTML=`<section class="panel"><div class="row"><h2 class="title">🏟️ Em campo</h2><span class="pill">Partida ${s.round}</span></div><div class="grid">${s.field.map(id=>teamCard(s,id,true)).join('')}</div></section><section class="panel"><h2 class="title">⏭️ Próximos a jogar</h2>${s.queue.map((id,i)=>`<div class="team" style="margin-bottom:8px"><div class="headrow"><b>${i+1}º da fila — Time ${id}</b><span class="pill">${i?'Aguardando':'Próximo'}</span></div><div class="small muted" style="margin-top:7px">${team(s,id).players.map(escapeHTML).join(' · ')}</div></div>`).join('')}<hr class="divider"><h3>⏳ Time ${s.waiting} — Incompleto (3/5)</h3>${listPlayers(team(s,s.waiting).players,s)}<p class="small muted">Receberá o Pote 1 e quem tirar a tampa 6 do próximo derrotado.</p></section>${s.history.length?`<section class="panel"><h2 class="title">🎲 Última derrota</h2>${(()=>{let h=s.history[s.history.length-1];return `<p>Time ${h.lost} perdeu. <b>${escapeHTML(h.leader)}</b> (Pote 1) e <b>${escapeHTML(h.drawn)}</b> (tampa 6) completaram o Time ${h.waiting}. Time ${h.next} entrou em campo.</p>`})()}</section>`:''}${s.extras.length?`<p class="small muted">Reservas extras fora do rodízio: ${escapeHTML(s.extras.join(', '))}</p>`:''}${role?`<section class="panel"><div class="toolbar"><button class="secondary" data-undo="1" ${s.history.length?'':'disabled'}>↶ Desfazer</button><button class="outline" data-config="1">⚙️ Novo sorteio / lista</button></div><p class="small muted">Alterações são compartilhadas com todos os celulares.</p></section>`:''}`;
+if(!s.started){app.innerHTML=`<section class="panel"><div class="row"><h2 class="title">Times sorteados</h2><span class="pill">Antes da 1ª partida</span></div><div class="grid">${[1,2,3,4].map(id=>teamCard(s,id)).join('')}</div><hr class="divider"><h3>Time 5 — Incompleto</h3>${listPlayers(team(s,5).players,s)}${extrasOf(s).length?`<p class="muted small">Reservas extras: ${escapeHTML(extrasOf(s).join(', '))}</p>`:''}${role?`<hr class="divider"><h3>Escolher primeira partida</h3><div class="flex2"><div><label>Time A</label><select id="firstA">${[1,2,3,4].map(i=>`<option value="${i}">Time ${i}</option>`).join('')}</select></div><div><label>Time B</label><select id="firstB">${[2,1,3,4].map(i=>`<option value="${i}">Time ${i}</option>`).join('')}</select></div></div><button class="wide" style="margin-top:12px" data-start="1">▶ Iniciar partida</button><div class="toolbar" style="margin-top:8px"><button class="secondary" data-config="1">Editar lista</button><button class="secondary" data-resort="1">Sortear novamente</button></div>`:''}</section>`;return;}
+app.innerHTML=`<section class="panel"><div class="row"><h2 class="title">🏟️ Em campo</h2><span class="pill">Partida ${s.round} · ${totalOf(s)} jogadores</span></div><div class="grid">${s.field.map(id=>teamCard(s,id,true)).join('')}</div></section><section class="panel"><h2 class="title">⏭️ Próximos a jogar</h2>${s.queue.map((id,i)=>`<div class="team" style="margin-bottom:8px"><div class="headrow"><b>${i+1}º da fila — Time ${id}</b><span class="pill">${i?'Aguardando':'Próximo'}</span></div><div class="small muted" style="margin-top:7px">${team(s,id).players.map(escapeHTML).join(' · ')}</div></div>`).join('')}<hr class="divider"><h3>⏳ Time ${s.waiting} — Incompleto (${team(s,s.waiting).players.length}/5)</h3>${listPlayers(team(s,s.waiting).players,s)}<p class="small muted">Receberá os jogadores necessários para completar 5 no próximo rodízio.</p></section>${s.history.length?`<section class="panel"><h2 class="title">🎲 Última derrota</h2>${(()=>{let h=s.history[s.history.length-1];return `<p>Time ${h.lost} perdeu. <b>${escapeHTML(h.leader||'Sem Pote 1')}</b> (Pote 1) e <b>${escapeHTML((h.moved||[h.leader,h.drawn]).filter(Boolean).filter(p=>p!==h.leader).join(', '))}</b> (tampas) completaram o Time ${h.waiting}. Time ${h.next} entrou em campo.</p>`})()}</section>`:''}${extrasOf(s).length?`<p class="small muted">Reservas extras fora do rodízio: ${escapeHTML(extrasOf(s).join(', '))}</p>`:''}${role?`<section class="panel"><h2 class="title">👋 Jogador saindo mais cedo</h2><p class="small muted">Remover jogador sem reiniciar. Se houver reserva extra, ela substitui o jogador automaticamente.</p><select id="removePlayer">${s.teams.flatMap(t=>t.players).concat(extrasOf(s)).sort((a,b)=>a.localeCompare(b,'pt-BR')).map(p=>`<option value="${escapeHTML(p)}">${escapeHTML(p)}</option>`).join('')}</select><button class="danger wide" style="margin-top:8px" data-remove="1">Remover jogador</button><hr class="divider"><div class="toolbar"><button class="secondary" data-undo="1" ${s.history.length?'':'disabled'}>↶ Desfazer</button><button class="outline" data-config="1">⚙️ Novo sorteio / lista</button></div><p class="small muted">Alterações são compartilhadas com todos os celulares.</p></section>`:''}`;
 }
-function openConfig(){if(!role)return;editing=true;let roster=state?state.teams.flatMap(t=>t.players).concat(state.extras):defaultNames;let capt=state?state.captains:defaultPote;$('app').innerHTML=`<section class="panel"><h2 class="title">⚙️ Configurar futebol</h2><p class="muted small">23 jogadores entram no rodízio (4 times de 5 e 1 grupo de 3). Nomes adicionais ficam como reservas extras.</p><label>Jogadores — um por linha</label><textarea id="roster" rows="12">${escapeHTML(roster.join('\n'))}</textarea><label>Pote 1 — exatamente 4 jogadores, um por linha</label><textarea id="captains" rows="4">${escapeHTML(capt.join('\n'))}</textarea><div class="notice">Sortear novamente substitui os times e reinicia a partida de todos os celulares.</div><button class="wide" data-create="1">🎲 Sortear times</button><button class="secondary wide" style="margin-top:8px" data-cancel="1">Cancelar</button></section>`;}
+function openConfig(){if(!role)return;editing=true;let roster=state?state.teams.flatMap(t=>t.players).concat(extrasOf(state)):defaultNames;let capt=state?state.captains:defaultPote;$('app').innerHTML=`<section class="panel"><h2 class="title">⚙️ Configurar futebol</h2><p class="muted small">23 jogadores entram no rodízio (4 times de 5 e 1 grupo de 3). Nomes adicionais ficam como reservas extras.</p><label>Jogadores — um por linha</label><textarea id="roster" rows="12">${escapeHTML(roster.join('\n'))}</textarea><label>Pote 1 — exatamente 4 jogadores, um por linha</label><textarea id="captains" rows="4">${escapeHTML(capt.join('\n'))}</textarea><div class="notice">Sortear novamente substitui os times e reinicia a partida de todos os celulares.</div><button class="wide" data-create="1">🎲 Sortear times</button><button class="secondary wide" style="margin-top:8px" data-cancel="1">Cancelar</button></section>`;}
+// Compatibilidade com sorteios criados por versões anteriores do site.
+function normalizeState(data){
+  if(data===null)return null;
+  if(!data||typeof data!=="object"||!Array.isArray(data.teams))throw Error('Dados antigos ou inválidos no Firebase. Use um novo sorteio.');
+  return {
+    ...data,
+    extras:Array.isArray(data.extras)?data.extras:(Array.isArray(data.bench)?data.bench:[]),
+    history:Array.isArray(data.history)?data.history:[],
+    captains:Array.isArray(data.captains)?data.captains:defaultPote,
+    field:Array.isArray(data.field)?data.field:[1,2],
+    queue:Array.isArray(data.queue)?data.queue:[3,4],
+    waiting:data.waiting??5,
+    round:data.round??1,
+    started:Boolean(data.started)
+  };
+}
 async function apiGet(){let resp=await fetch(DB+'?t='+Date.now(),{cache:'no-store'});if(!resp.ok)throw Error('Leitura negada pelo Firebase ('+resp.status+'). Confira as regras.');return await resp.json();}
 async function save(newState){if(busy)return;busy=true;showMsg('Salvando para todos...');try{newState.updatedAt=Date.now();const r=await fetch(DB,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(newState)});if(!r.ok)throw Error('Firebase rejeitou a alteração ('+r.status+'). Confira as regras.');state=newState;lastJson=JSON.stringify(newState);editing=false;render();showMsg('✅ Atualizado para todos os jogadores.');}catch(e){showMsg(e.message,true);}finally{busy=false;}}
-async function refresh(){if(busy||editing||requesting)return;requesting=true;try{const data=await apiGet();let json=JSON.stringify(data);if(json!==lastJson){state=data;lastJson=json;render();}fetchError=false;$('connection').textContent='● Conectado';$('connection').style.color='#b8edd8';$('lastSync').textContent='Atualização automática a cada 3 segundos';}catch(e){$('connection').textContent='● Sem conexão';$('connection').style.color='#ffb0b0';if(!fetchError)showMsg('Não foi possível acessar o Firebase: '+e.message,true);fetchError=true;}finally{requesting=false;}}
-function handleLose(id){if(!role||!state||!state.started||!state.field.includes(id))return;const s=structuredClone(state),lost=team(s,id),captain=lost.players.find(p=>member(p,s));if(!captain)return showMsg('Pote 1 não encontrado no time.',true);const rest=lost.players.filter(p=>p!==captain);const chosen=rest[Math.floor(Math.random()*rest.length)];const three=rest.filter(x=>x!==chosen);const was=s.waiting,next=s.queue[0];lost.players=three;team(s,was).players.push(captain,chosen);s.field=[s.field.find(x=>x!==id),next];s.queue=[s.queue[1],was];s.waiting=id;s.history.push({lost:id,leader:captain,drawn:chosen,waiting:was,next,previous:{teams:state.teams,field:state.field,queue:state.queue,waiting:state.waiting,round:state.round}});if(s.history.length>25)s.history=s.history.slice(-25);s.round++;save(s);}
+async function refresh(){if(busy||editing||requesting)return;requesting=true;try{const data=normalizeState(await apiGet());let json=JSON.stringify(data);if(json!==lastJson){state=data;lastJson=json;render();}if(fetchError)showMsg('✅ Conexão restabelecida.');fetchError=false;$('connection').textContent='● Conectado';$('connection').style.color='#b8edd8';$('lastSync').textContent='Atualização automática a cada 3 segundos';}catch(e){$('connection').textContent='● Sem conexão';$('connection').style.color='#ffb0b0';if(!fetchError)showMsg('Não foi possível acessar o Firebase: '+e.message,true);fetchError=true;}finally{requesting=false;}}
+function removePlayer(name){
+  if(!role||!state||busy)return;
+  const s=structuredClone(state);
+  const all=s.teams.flatMap(t=>t.players).concat(extrasOf(s));
+  const actual=all.find(p=>clean(p)===clean(name));
+  if(!actual)return showMsg('Jogador não encontrado.',true);
+  if(totalOf(s)<=20 && extrasOf(s).length===0)return showMsg('Com menos de 20 jogadores é preciso montar um novo formato de times. Remoção cancelada.',true);
+  if(!confirm('Remover '+actual+' da partida? A mudança aparecerá para todos.'))return;
+  const isCaptain=member(actual,s);
+  const extraIndex=s.extras.findIndex(p=>clean(p)===clean(actual));
+  if(extraIndex>=0){s.extras.splice(extraIndex,1);}
+  else{
+    let t=s.teams.find(t=>t.players.some(p=>clean(p)===clean(actual)));
+    t.players=t.players.filter(p=>clean(p)!==clean(actual));
+    if(t.id!==s.waiting){
+      if(s.extras.length){t.players.push(s.extras.shift());}
+      else{
+        const w=team(s,s.waiting);
+        if(!w.players.length)return showMsg('Não há substituto disponível. Faça novo sorteio.',true);
+        t.players.push(w.players.shift());
+      }
+    }
+  }
+  if(isCaptain)s.captains=s.captains.filter(p=>clean(p)!==clean(actual));
+  s.history=[]; // evita desfazer uma rodada e ressuscitar jogador removido
+  s.lastDeparture=actual;
+  save(s);
+  if(isCaptain)showMsg('Jogador do Pote 1 removido. Agora restam '+s.captains.length+' líderes; para voltar a ter 4 líderes, faça novo sorteio.',false);
+}
+function handleLose(id){
+ if(!role||!state||!state.started||!state.field.includes(id)||busy)return;
+ const s=structuredClone(state),lost=team(s,id),w=team(s,s.waiting);
+ if(!lost||lost.players.length!==5||!w)return showMsg('Há times incompletos fora da espera; faça novo sorteio.',true);
+ const missing=5-w.players.length;
+ if(missing<0||missing>5)return showMsg('Fila inconsistente. Faça novo sorteio.',true);
+ let leader=lost.players.find(p=>member(p,s));
+ const others=shuffled(lost.players.filter(p=>p!==leader));
+ const moved=(leader?[leader]:[]).concat(others).slice(0,missing);
+ if(moved.length!==missing)return showMsg('Não foi possível completar o próximo time.',true);
+ lost.players=lost.players.filter(p=>!moved.includes(p));w.players.push(...moved);
+ const next=s.queue[0];
+ s.field=[s.field.find(x=>x!==id),next];s.queue=[s.queue[1],s.waiting];s.waiting=id;
+ s.history.push({lost:id,leader:leader||'',drawn:moved.find(p=>p!==leader)||'',moved,waiting:w.id,next,previous:{teams:state.teams,field:state.field,queue:state.queue,waiting:state.waiting,round:state.round,captains:state.captains,extras:state.extras}});
+ if(s.history.length>25)s.history=s.history.slice(-25);s.round++;
+ save(s);
+}
 function undo(){if(!state||!state.history.length)return;let before=state.history[state.history.length-1].previous;if(before)save({...state,...before,history:state.history.slice(0,-1)});else showMsg('Não foi possível desfazer.',true);}
 $('authBtn').onclick=()=>{if(role){role='';sessionStorage.removeItem(KEY);$('authForm').classList.add('hidden');editing=false;render();}else $('authForm').classList.toggle('hidden');};$('cancelLogin').onclick=()=>{$('authForm').classList.add('hidden');};$('loginBtn').onclick=()=>{const name=clean($('username').value).replace(/\s/g,'');const pass=$('password').value;if(ADMINS.includes(name)&&pass==='12345'){role=name;sessionStorage.setItem(KEY,name);$('authForm').classList.add('hidden');$('password').value='';$('loginError').textContent='';render();}else $('loginError').textContent='Nome ou senha inválidos.';};
-$('app').addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.config)openConfig();if(b.dataset.cancel){editing=false;render();}if(b.dataset.create){const names=$('roster').value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);const cps=$('captains').value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);if(names.length<23)return showMsg('São necessários pelo menos 23 jogadores.',true);if(new Set(names.map(clean)).size!==names.length)return showMsg('Existem nomes duplicados na lista.',true);if(cps.length!==4||new Set(cps.map(clean)).size!==4||cps.some(c=>!names.some(n=>clean(n)===clean(c))))return showMsg('Pote 1 precisa ter quatro jogadores diferentes presentes na lista.',true);save(makeInitial(names,cps));}if(b.dataset.resort){const n=state.teams.flatMap(t=>t.players).concat(state.extras);save(makeInitial(n,state.captains));}if(b.dataset.start){let a=Number($('firstA').value),bb=Number($('firstB').value);if(a===bb)return showMsg('Escolha dois times diferentes.',true);let s=structuredClone(state);s.field=[a,bb];s.queue=[1,2,3,4].filter(i=>i!==a&&i!==bb);s.started=true;save(s);}if(b.dataset.lose)handleLose(Number(b.dataset.lose));if(b.dataset.undo)undo();});
+$('app').addEventListener('click',e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.config)openConfig();if(b.dataset.cancel){editing=false;render();}if(b.dataset.create){const names=$('roster').value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);const cps=$('captains').value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean);if(names.length<23)return showMsg('Para um novo sorteio são necessários 23 jogadores. Durante a partida você pode remover quem sair.',true);if(new Set(names.map(clean)).size!==names.length)return showMsg('Existem nomes duplicados na lista.',true);if(cps.length!==4||new Set(cps.map(clean)).size!==4||cps.some(c=>!names.some(n=>clean(n)===clean(c))))return showMsg('Pote 1 precisa ter quatro jogadores diferentes presentes na lista.',true);save(makeInitial(names,cps));}if(b.dataset.resort){const n=state.teams.flatMap(t=>t.players).concat(extrasOf(state));save(makeInitial(n,state.captains));}if(b.dataset.start){if(!state)return showMsg('Primeiro sorteie os times.',true);let a=Number($('firstA')?.value),bb=Number($('firstB')?.value);if(a===bb)return showMsg('Escolha dois times diferentes.',true);let s=structuredClone(state);s.field=[a,bb];s.queue=[1,2,3,4].filter(i=>i!==a&&i!==bb);s.started=true;s.round=1;s.history=[];save(s);}if(b.dataset.lose)handleLose(Number(b.dataset.lose));if(b.dataset.remove)removePlayer($('removePlayer').value);if(b.dataset.undo)undo();});
 render();refresh();setInterval(refresh,3000);
 </script></body></html>
